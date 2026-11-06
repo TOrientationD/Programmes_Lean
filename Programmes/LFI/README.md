@@ -84,6 +84,29 @@ chiffré ; la remise de 2022 avait coûté ≈ 8 Md€), impôt sur le revenu à
 14 tranches. Recalibrages publiés depuis, appliqués le 30 octobre 2026 : SMIC à
 1 700 € net (L-11), retraite d'abord à 62 ans (9 Md€, variante de L-10).
 
+## Brochure « Comment nous allons remettre de l'ordre dans les comptes publics »
+
+La [brochure](https://melenchon2027.fr/wp-content/uploads/2026/10/Comment-nous-allons-remettre-de-l-ordre-dans-les-comptes-publics.pdf)
+(octobre 2026) détaille le budget rectificatif : toutes ses lignes sont
+dans le programme (L-10 à L-32), et le théorème `budget_totaux` retrouve
+ses totaux. Le modèle, scénario central, en 2027, pour ces seules lignes
+(la retraite à 62 ans, première étape de L-10) :
+
+| | Brochure (p. 14) | Modèle |
+|---|---|---|
+| Recettes en plus | 106,4 Md€ | 101,5 Md€ (fuite fiscale, effets sur l'activité) |
+| Dépenses en plus | 81,7 Md€ | 77,2 Md€ |
+| Déficit en moins | 24,7 Md€ | 24,4 Md€ (5,69 % du PIB au lieu de 6,52 %) |
+| Charge de la dette en 2027 | 2,9 % du PIB (p. 19) | 2,89 % (tendanciel) |
+
+Avec le reste du programme (retraite à 60 ans, 100 % Sécu, plans
+thématiques…), le déficit de 2027 monte à 9,32 % du PIB au moteur de
+demande.
+
+Sans chiffrage dans la brochure, non transcrits : pension minimale au
+niveau du SMIC pour une carrière complète (p. 12), blocage du carburant à
+1,70 € le litre (p. 9).
+
 ## Ajouts du 28 octobre 2026 : plans thématiques et *L'Avenir en commun* 2025
 
 Le programme complet (5e édition de *L'Avenir en commun*) paraît le
@@ -155,8 +178,8 @@ montants viennent de données officielles ou de chiffrages indépendants
 | L-64 Pôle public bancaire, de 100 à 200 Md€ de financements par an | hors administrations publiques selon la source, non imputé ; variante : requalification par Eurostat, 100 Md€ de dette en plus chaque année |
 | L-65 Livret A à 30 000 € et taux au moins égal à l'inflation | −0,21 Md€/an d'impôt sur le revenu et de prélèvements sociaux (40 Md€ d'encours exonérés, borne haute) ; taux à l'inflation sans coût aux hypothèses centrales (le taux court y dépasse l'inflation), 2,0 Md€ d'aides à la pierre par point d'écart |
 
-L-28 passe de 2,6 à 3 Md€ contre les violences faites aux femmes, montant
-du plan santé (2,6 Md€ en variante).
+L-28 reste à 2,6 Md€ de plus contre les violences faites aux femmes : les
+3 milliards du plan santé sont le total visé (brochure budgétaire, p. 10).
 
 Non chiffrés : enveloppe d'urgence des hôpitaux, réouverture de lits
 (objectif de 20 % de lits vacants), urgences et maternités à moins de
@@ -181,7 +204,7 @@ cette dette et la prime de risque qu'elle relève ; borne haute, car les
 intérêts que rapporteraient ces prêts ne sont pas comptés.
 
 Effet des ajouts au scénario central, moteur de demande, en 2035 : déficit
-de 19,18 % du PIB au lieu de 18,81 %, dette de 190,5 % (190,6 %), chômage de
+de 19,16 % du PIB au lieu de 18,81 %, dette de 190,5 % (190,6 %), chômage de
 6,06 % (6,45 %).
 
 ## Ce qui ne l'est pas, faute de montant dans la source

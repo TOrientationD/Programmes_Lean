@@ -11,8 +11,9 @@ par J.-L. Mélenchon et É. Coquerel le 14 octobre 2026 (Public Sénat,
 France Épargne) : le plan d'investissement productif « Automobile »
 (L-01 à L-09), deux mesures phares de *L'Avenir en commun* 2025 (L-10
 retraite à 60 ans, L-11 SMIC à 1 700 € net, chiffre du budget rectificatif) et les recettes et dépenses
-chiffrées du budget rectificatif (L-12 à L-25 : 83,5 Md€ de recettes et
-54,6 Md€ de dépenses détaillées, sur 106,4 et 81,7 annoncés). Les mesures
+chiffrées du budget rectificatif (L-12 à L-32 : 106,4 Md€ de recettes et 81,7 Md€
+de dépenses, théorème `budget_totaux` ; brochure « Comment nous allons
+remettre de l'ordre dans les comptes publics », octobre 2026). Les mesures
 automobiles reprennent chacune une ligne du tableau « Les investissements
 supplémentaires », en millions d'euros par an.
 
@@ -52,7 +53,28 @@ open Modele
 
 /-- Référence commune des mesures. -/
 def budget : String :=
-  "Budget rectificatif 2027 de LFI, 14 octobre 2026 (Public Sénat, France Épargne)"
+  "Budget rectificatif 2027 de LFI, « Comment nous allons remettre de l'ordre dans les comptes publics » (melenchon2027.fr, octobre 2026 ; présenté le 14 octobre 2026)"
+
+/-- Chiffrage du budget rectificatif, M€ par an (brochure, p. 8 à 14) :
+recettes (p. 13-14) et dépenses (p. 8-12), avec la ligne du programme qui
+les porte. Le retour à 62 ans (9 Md€) est la première étape de L-10 ;
+violences sexistes et sexuelles : 2,6 Md€ de plus « pour atteindre
+3 milliards » (p. 10). -/
+def recettesBudget : List (String × Int) :=
+  [("L-13", 9000), ("L-12", 10000), ("L-16", 22000), ("L-30", 3000), ("L-14", 15000),
+   ("L-15", 20000), ("L-30", 3000), ("L-30", 5000), ("L-31", 3900), ("L-30", 5000),
+   ("L-17", 5000), ("L-17", 2500), ("L-32", 1000), ("L-32", 2000)]
+def depensesBudget : List (String × Int) :=
+  [("L-18", 17000), ("L-21", 8000), ("L-26", 3000), ("L-19", 9500), ("L-25", 500),
+   ("L-22", 3600), ("L-27", 3500), ("L-23", 3000), ("L-28", 2600), ("L-28", 2000),
+   ("L-29", 7000), ("L-20", 10000), ("L-10", 9000), ("L-24", 3000)]
+
+/-- Les totaux de la brochure : 106,4 Md€ de recettes, 81,7 Md€ de
+dépenses, 24,7 Md€ de déficit en moins (p. 14). -/
+theorem budget_totaux :
+    (recettesBudget.map (·.2)).sum = 106400 ∧ (depensesBudget.map (·.2)).sum = 81700 ∧
+    (recettesBudget.map (·.2)).sum - (depensesBudget.map (·.2)).sum = 24700 := by
+  decide
 
 def page : String :=
   "melenchon2027.fr/programme/plans-investissement/automobile, tableau « Les investissements supplémentaires »"
@@ -464,9 +486,8 @@ def mesures : List Mesure := [
     source := s!"{budget} : +3,5 Md€/an (chiffrage du parti) ; 250 000 places = +4,5 points de scolarisation à chaque âge de 18 à 24 ans (800 000 jeunes par génération) : coût et durée attendue de scolarisation calculés par le modèle commun (≈ 3,4 Md€)"
     leviers := [.scolarisationJeunes 45] },
   { id := "L-28", titre := "Violences sexistes et sexuelles, violences faites aux enfants"
-    source := s!"Plan « Reconstruire notre système de santé » (édition 2027, § 2.9) : « engager trois milliards d'euros contre les violences faites aux femmes » ; {budget} : +2,6 Md€ (budget demandé par les associations, variante) et +2 Md€ (plan contre les violences faites aux enfants), chiffrage du parti"
-    leviers := [.depenseSur .securiteJustice 3000, .depenseSur .famille 2000]
-    variantes := [{ nom := "2,6 Md€ (budget rectificatif)", leviers := [.depenseSur .securiteJustice 2600, .depenseSur .famille 2000] }] },
+    source := s!"{budget}, p. 10 : +2,6 Md€ « pour atteindre 3 milliards » contre les violences sexistes et sexuelles (budget demandé par les associations ; le plan santé, édition 2027, § 2.9, cite ces 3 milliards) et +2 Md€ (plan contre les violences faites aux enfants), chiffrage du parti"
+    leviers := [.depenseSur .securiteJustice 2600, .depenseSur .famille 2000] },
   { id := "L-29", titre := "Réindexation des budgets ministériels coupés en 2026 (travail, logement, culture, sport, diplomatie, aide au développement)"
     source := s!"{budget} : +7 Md€/an, sans ventilation (chiffrage du parti) : non ventilé"
     leviers := [.depense 7000] },
