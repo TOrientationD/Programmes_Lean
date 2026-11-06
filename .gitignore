@@ -1,0 +1,5 @@
+/.lake/
+/out/
+/rapport.json
+/rapport.md
+__pycache__/

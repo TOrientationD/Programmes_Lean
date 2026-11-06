@@ -1,0 +1,89 @@
+# Contrôle d'accès : un dossier Programmes/<X>/ ou Moteurs/<X>/ ne peut être
+# modifié que par les comptes listés dans son fichier PROPRIETAIRES (lu sur la branche
+# de base ; pour un nouveau programme, dans la PR, et il doit nommer
+# l'auteur). Règles détaillées : scripts/controle_acces.py.
+#
+# Sécurité — déclenché par pull_request_target, ce workflow est TOUJOURS
+# celui de la branche de base : une PR ne peut ni le modifier ni le
+# désactiver pour elle-même. En contrepartie il ne récupère ni n'exécute
+# JAMAIS le code de la PR : il lit la liste des fichiers modifiés et, pour un
+# nouveau programme, le texte de son fichier PROPRIETAIRES, via l'API.
+# L'auteur est celui de l'événement GitHub, que la PR ne contrôle pas.
+#
+# À rendre obligatoire dans le ruleset de main : « Contrôle d'accès aux
+# programmes ».
+
+name: Accès aux programmes
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: acces-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  acces:
+    name: Contrôle d'accès aux programmes
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Récupérer la branche de base (code de confiance)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Lire la PR via l'API (données seulement)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+            const fichiers = await github.paginate(github.rest.pulls.listFiles,
+              { owner, repo, pull_number: pr.number, per_page: 100 });
+            const programmes = new Set();
+            for (const f of fichiers) {
+              for (const p of [f.filename, f.previous_filename]) {
+                const m = p && /^(Programmes|Moteurs)\/([^/]+)\//.exec(p);
+                if (m) programmes.add(`${m[1]}/${m[2]}`);
+              }
+            }
+            // PROPRIETAIRES tel que proposé par la PR (utile pour un nouveau
+            // programme). Lu dans le dépôt de tête (fork) si possible.
+            const sources = [];
+            if (pr.head.repo) sources.push({ owner: pr.head.repo.owner.login, repo: pr.head.repo.name });
+            sources.push({ owner, repo });
+            const tete = {};
+            for (const x of programmes) {
+              tete[x] = null;
+              for (const s of sources) {
+                try {
+                  const { data } = await github.rest.repos.getContent(
+                    { ...s, path: `${x}/PROPRIETAIRES`, ref: pr.head.sha });
+                  if (!Array.isArray(data) && data.content !== undefined) {
+                    tete[x] = Buffer.from(data.content, data.encoding).toString('utf8');
+                  }
+                  break;
+                } catch (e) {
+                  if (e.status !== 404) throw e;
+                }
+              }
+            }
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/acces.json`, JSON.stringify({
+              auteur: pr.user.login,
+              fichiers: fichiers.map(f => ({
+                filename: f.filename,
+                previous_filename: f.previous_filename ?? null,
+                status: f.status })),
+              proprietaires_tete: tete }));
+
+      - name: Vérifier les droits
+        shell: bash
+        run: python3 -I scripts/controle_acces.py "$RUNNER_TEMP/acces.json" . | tee -a "$GITHUB_STEP_SUMMARY"

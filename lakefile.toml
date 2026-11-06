@@ -1,0 +1,50 @@
+name = "programmes"
+version = "0.1.0"
+defaultTargets = ["Modele", "Hypotheses", "Proprietes", "Moteurs", "Programmes", "Engagements"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+
+# Modèle économique commun : état, leviers, scénario, projection.
+# Toute modification ici change l'évaluation de TOUS les programmes.
+[[lean_lib]]
+name = "Modele"
+
+# Hypothèses partagées (démographie, économie, droit) et leur combinaison.
+[[lean_lib]]
+name = "Hypotheses"
+
+# Propriétés partagées, évaluées pour chaque programme sous chaque scénario.
+[[lean_lib]]
+name = "Proprietes"
+
+# Un dossier par moteur contribué + registre (Moteurs.lean).
+[[lean_lib]]
+name = "Moteurs"
+
+# Un dossier par programme + registre (Programmes.lean).
+[[lean_lib]]
+name = "Programmes"
+
+# Preuve que tous les engagements de tous les programmes sont tenus.
+# Séparée de `Programmes` pour que le rapport se construise même quand un
+# engagement est cassé (il explique alors lequel).
+[[lean_lib]]
+name = "Engagements"
+
+# Matrice programme × scénario × propriété (JSON + Markdown).
+# En CI et par défaut, le rapport est compilé puis exécuté :
+#   lake build rapport && .lake/build/bin/rapport
+# (≈ 80 s de compilation en C, puis ≈ 8 min d'exécution ; interprété par
+# `lake env lean --run Rapport.lean`, même sortie, il prend 30 à 50 min).
+[[lean_exe]]
+name = "rapport"
+root = "Rapport"
+
+# Batterie de tests du modèle commun : invariants comptables, propriétés des
+# mécanismes, rétro-test sur les comptes observés. Chaque fichier de Tests/
+# est un module autonome (aucun n'en importe un autre).
+[[lean_lib]]
+name = "Tests"
+globs = ["Tests.+"]

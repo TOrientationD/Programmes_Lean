@@ -1,0 +1,242 @@
+# Vérification et évaluation de tous les programmes sous toutes les hypothèses.
+#
+# Tourne sur chaque PR, y compris depuis un fork : le jeton est en lecture
+# seule et aucun secret n'est exposé. Le commentaire de PR est publié par un
+# workflow séparé et privilégié (commentaire-pr.yml) qui n'exécute jamais le
+# code de la PR.
+#
+# Modèle de confiance (détails dans le README) :
+#   * les scripts Python sont ceux de la BRANCHE DE BASE, jamais ceux de la PR ;
+#   * le garde-fou syntaxique (scripts/garde_fou.py) passe AVANT toute
+#     compilation : sans #eval, run_cmd, set_option, import Lean…, compiler
+#     le code de la PR ne peut pas falsifier les étapes suivantes ;
+#   * les preuves sont rejouées par leanchecker, indépendamment de
+#     l'élaborateur ;
+#   * une PR qui modifie l'outillage (.github/, scripts/, Rapport.lean,
+#     Audit.lean, configuration de build) exécute sa propre version de cet
+#     outillage : son verdict ne vaut qu'après relecture humaine. Le
+#     commentaire de PR le signale.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verifier:
+    name: Vérifier et évaluer
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ELAN_NO_OVERRIDE_NOTICE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Récupérer les outils de la branche de base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          OUTILS="$RUNNER_TEMP/outils"
+          mkdir -p "$OUTILS"
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA:scripts/garde_fou.py" 2>/dev/null; then
+            git archive "$BASE_SHA" scripts | tar -x -C "$OUTILS"
+            echo "Outils pris sur la base ($BASE_SHA)."
+          else
+            # Push sur main, ou PR qui introduit les scripts.
+            cp -r scripts "$OUTILS/"
+            [ -n "$BASE_SHA" ] && echo "::warning::La base n'a pas de garde-fou : outils de la PR utilisés."
+          fi
+          echo "OUTILS=$OUTILS/scripts" >> "$GITHUB_ENV"
+
+      # Bloquant : si le garde-fou échoue, aucun code de la PR n'est compilé.
+      - name: Garde-fou syntaxique (avant toute compilation)
+        id: garde
+        run: python3 -I "$OUTILS/garde_fou.py" .
+
+      - name: Registre des programmes
+        id: registre
+        continue-on-error: true
+        run: python3 -I "$OUTILS/verifier_registre.py" .
+
+      - name: Installer elan (gestionnaire de versions Lean)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache de la chaîne Lean
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan/toolchains
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      # La base est évaluée AVANT de compiler le code de la PR.
+      - name: Calculer la matrice sur la branche de base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p out
+          git diff --name-only "$BASE_SHA" "$GITHUB_SHA" > out/fichiers.txt
+          git worktree add -q "$RUNNER_TEMP/base" "$BASE_SHA"
+          # La base peut ne pas compiler (premier commit, toolchain cassée…) :
+          # dans ce cas le diff présente tout comme nouveau.
+          ( cd "$RUNNER_TEMP/base" && lake build rapport \
+              && .lake/build/bin/rapport --json "$GITHUB_WORKSPACE/out/base.json" --md /dev/null ) \
+            || echo "::warning::La base ne produit pas de rapport ; diff calculé contre un rapport vide."
+
+      # Seuls les .olean sont produits ici ; le rapport est compilé à l'étape
+      # suivante (`lake build rapport`, ~80 s de C) : exécuté, il tient en
+      # ≈ 8 min là où l'interprétation en prenait 30 à 50.
+      - name: Compiler le modèle, les hypothèses, les propriétés et les programmes
+        id: compilation
+        run: lake build Programmes Moteurs
+
+      # Batterie de tests du modèle commun (Tests/) : identités comptables,
+      # mécanismes, rétro-test sur les comptes 2018-2025, tendanciel face à
+      # une projection indépendante. Décidés par le noyau, comme les
+      # engagements ; rejoués par leanchecker avec les autres modules.
+      - name: Tests du modèle commun
+        id: tests
+        if: steps.compilation.outcome == 'success'
+        continue-on-error: true
+        run: lake build Tests
+
+      - name: Calculer la matrice d'évaluation
+        id: rapport
+        continue-on-error: true
+        run: |
+          mkdir -p out
+          lake build rapport
+          .lake/build/bin/rapport --json out/rapport.json --md out/rapport.md
+
+      - name: Comparer base et PR
+        if: github.event_name == 'pull_request' && steps.compilation.outcome == 'success'
+        run: |
+          python3 -I "$OUTILS/diff_rapport.py" out/base.json out/rapport.json \
+            --fichiers out/fichiers.txt --out out/diff.md
+
+      - name: Vérifier les engagements (preuves Lean)
+        id: engagements
+        continue-on-error: true
+        run: lake build Engagements
+
+      # Rejoue chaque module compilé du dépôt, liste tirée des .olean (un
+      # module déplacé par srcDir n'y échappe pas). La bibliothèque standard
+      # n'est pas rejouée (--fresh, ~80 s) : elle vient de la toolchain
+      # officielle imposée par le garde-fou, et une toolchain compromise
+      # compromettrait leanchecker lui-même.
+      - name: Rejouer toutes les preuves dans le noyau (leanchecker)
+        id: noyau
+        if: steps.engagements.outcome == 'success'
+        continue-on-error: true
+        run: |
+          MODULES=$(cd .lake/build/lib/lean && find . -name '*.olean' \
+            | sed 's|^\./||; s|\.olean$||; s|/|.|g' | sort)
+          echo "$(echo "$MODULES" | wc -l) modules rejoués"
+          # shellcheck disable=SC2086
+          lake env leanchecker $MODULES
+
+      - name: Auditer les axiomes (pas de sorry, native_decide ni axiom)
+        id: audit
+        if: steps.engagements.outcome == 'success'
+        continue-on-error: true
+        run: lake env lean Audit.lean
+
+      - name: Rédiger le résumé
+        if: ${{ !cancelled() }}
+        env:
+          GARDE: ${{ steps.garde.outcome }}
+          REGISTRE: ${{ steps.registre.outcome }}
+          COMPILATION: ${{ steps.compilation.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          RAPPORT: ${{ steps.rapport.outcome }}
+          ENGAGEMENTS: ${{ steps.engagements.outcome }}
+          NOYAU: ${{ steps.noyau.outcome }}
+          AUDIT: ${{ steps.audit.outcome }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p out
+          statut() {
+            case "$1" in
+              success) echo "✅" ;;
+              skipped|"") echo "⏭️ non exécuté" ;;
+              *) echo "❌" ;;
+            esac
+          }
+          {
+            echo "### Vérifications"
+            echo ""
+            echo "| Vérification | Statut |"
+            echo "| --- | --- |"
+            echo "| Garde-fou syntaxique (pas de code exécuté à la compilation) | $(statut "$GARDE") |"
+            echo "| Registre des programmes | $(statut "$REGISTRE") |"
+            echo "| Compilation (modèle, hypothèses, propriétés, programmes) | $(statut "$COMPILATION") |"
+            echo "| Tests du modèle commun (comptabilité, mécanismes, rétro-test) | $(statut "$TESTS") |"
+            echo "| Matrice d'évaluation | $(statut "$RAPPORT") |"
+            echo "| Engagements prouvés par le noyau Lean | $(statut "$ENGAGEMENTS") |"
+            echo "| Rejeu indépendant des preuves (leanchecker) | $(statut "$NOYAU") |"
+            echo "| Audit des axiomes | $(statut "$AUDIT") |"
+            echo ""
+            [ -f out/diff.md ] && cat out/diff.md && echo ""
+            if [ -f out/rapport.md ]; then
+              # Score global et tableaux de synthèse (scénarios où chaque
+              # propriété tient, en dégradé de couleurs) visibles d'emblée ;
+              # le reste du rapport replié.
+              echo "### Respect des propriétés"
+              echo ""
+              awk '/^## /{garder = ($0 ~ /^## (Score global|Synthèse, moteur)/)} garder' out/rapport.md \
+                | sed 's/^## /#### /'
+              echo ""
+              echo "<details><summary>Rapport complet</summary>"
+              echo ""
+              awk 'BEGIN {garder = 1} /^## /{garder = ($0 !~ /^## (Score global|Synthèse, moteur)/)} garder' out/rapport.md \
+                | sed 's/^# /#### /; s/^## /#### /'
+              echo ""
+              echo "</details>"
+            fi
+          } > out/commentaire.md
+          cat out/commentaire.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PR_NUMBER" ]; then
+            echo "$PR_NUMBER" > out/pr_number
+            echo "$HEAD_SHA" > out/head_sha
+          fi
+
+      - name: Publier le rapport (artefact)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event_name == 'pull_request' && 'rapport-pr' || 'rapport' }}
+          path: out/
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 90 }}
+
+      - name: Statut final
+        if: ${{ !cancelled() }}
+        env:
+          GARDE: ${{ steps.garde.outcome }}
+          REGISTRE: ${{ steps.registre.outcome }}
+          COMPILATION: ${{ steps.compilation.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          RAPPORT: ${{ steps.rapport.outcome }}
+          ENGAGEMENTS: ${{ steps.engagements.outcome }}
+          NOYAU: ${{ steps.noyau.outcome }}
+          AUDIT: ${{ steps.audit.outcome }}
+        run: |
+          echo "garde=$GARDE registre=$REGISTRE compilation=$COMPILATION tests=$TESTS rapport=$RAPPORT"
+          echo "engagements=$ENGAGEMENTS noyau=$NOYAU audit=$AUDIT"
+          for s in "$GARDE" "$REGISTRE" "$COMPILATION" "$TESTS" "$RAPPORT" "$ENGAGEMENTS" "$NOYAU" "$AUDIT"; do
+            [ "$s" = "success" ] || exit 1
+          done

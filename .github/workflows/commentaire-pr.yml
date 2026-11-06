@@ -1,0 +1,99 @@
+# Publie le résumé de la CI en commentaire de PR, y compris pour les PR
+# venant de forks (dont le jeton CI est en lecture seule).
+#
+# Sécurité — ce workflow a les droits d'écriture sur les PR, donc :
+#   * il ne récupère JAMAIS le code de la PR (pas de checkout) ;
+#   * il traite l'artefact comme une donnée non fiable : seul le texte du
+#     commentaire en est lu, et le numéro de PR est revérifié via l'API
+#     contre le SHA du run CI (impossible de viser une autre PR) ;
+#   * le verdict affiché en tête et l'alerte « outillage modifié » sont
+#     calculés ici via l'API, pas lus dans l'artefact.
+
+name: Commentaire de PR
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  commenter:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    # Runner 1 vCPU (0,002 $/min au lieu de 0,006) : ce job ne fait que
+    # télécharger un artefact et appeler l'API.
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Télécharger l'artefact du run CI
+        uses: actions/download-artifact@v4
+        with:
+          name: rapport-pr
+          path: out
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publier ou mettre à jour le commentaire
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const MARQUEUR = '<!-- rapport-programmes -->';
+
+            const brut = fs.readFileSync('out/pr_number', 'utf8').trim();
+            if (!/^\d{1,7}$/.test(brut)) {
+              core.setFailed(`Numéro de PR invalide dans l'artefact : ${JSON.stringify(brut)}`);
+              return;
+            }
+            const pr = Number(brut);
+
+            const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pr });
+            if (pull.head.sha !== run.head_sha) {
+              core.notice(`PR #${pr} a avancé (${pull.head.sha} ≠ ${run.head_sha}) : un run plus récent commentera.`);
+              return;
+            }
+
+            // En-tête de confiance : calculé ICI, via l'API, jamais lu dans
+            // l'artefact (produit par un run qui a compilé le code de la PR).
+            const fichiers = await github.paginate(github.rest.pulls.listFiles,
+              { owner, repo, pull_number: pr, per_page: 100 });
+            const chemins = fichiers.flatMap(f => [f.filename, f.previous_filename].filter(Boolean));
+            const OUTILLAGE = [/^\.github\//, /^scripts\//, /^Rapport\.lean$/, /^Audit\.lean$/,
+                               /^lakefile\./, /^lean-toolchain$/, /^lake-manifest\.json$/];
+            const outillage = [...new Set(chemins.filter(c => OUTILLAGE.some(r => r.test(c))))];
+            const verdict = run.conclusion === 'success'
+              ? '✅ **CI réussie**'
+              : `❌ **CI en échec** (\`${run.conclusion}\`)`;
+            let entete = `${verdict} — statut lu via l'API GitHub.`;
+            if (outillage.length) {
+              entete += '\n\n> ⚠️ **Cette PR modifie l\'outillage exécuté par la CI** (' +
+                outillage.map(c => `\`${c}\``).join(', ') + '). ' +
+                'Sur une PR, GitHub exécute la version modifiée : le verdict et le rapport ' +
+                'ci-dessous **ne valent qu\'après relecture de ces fichiers**.';
+            }
+
+            let corps = fs.readFileSync('out/commentaire.md', 'utf8').replaceAll(MARQUEUR, '');
+            const MAX = 60000;
+            if (corps.length > MAX) {
+              corps = corps.slice(0, MAX) +
+                `\n\n_(tronqué — rapport complet : ${run.html_url})_`;
+            }
+            corps = `${MARQUEUR}\n${entete}\n\n---\n\n${corps}\n\n<sub>Run CI : ${run.html_url}</sub>`;
+
+            const commentaires = await github.paginate(github.rest.issues.listComments,
+              { owner, repo, issue_number: pr, per_page: 100 });
+            const existant = commentaires.find(c =>
+              c.user?.type === 'Bot' && c.body?.startsWith(MARQUEUR));
+            if (existant) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existant.id, body: corps });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr, body: corps });
+            }

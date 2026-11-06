@@ -1,0 +1,29 @@
+# Revue obligatoire (avec la règle « Require review from Code Owners »).
+# La dernière règle qui correspond l'emporte. Les comptes d'exemple sont
+# remplacés par `scripts/publier.sh COMPTE` ; sur une organisation, on peut
+# ensuite les remplacer par des équipes (@org/socle, @org/<programme>).
+
+# Par défaut : mainteneurs du dépôt
+*                         @TOrientationD
+
+# Socle commun : toute modification change l'évaluation de TOUS les programmes
+/Modele/                  @TOrientationD
+/Modele.lean              @TOrientationD
+/Hypotheses/              @TOrientationD
+/Hypotheses.lean          @TOrientationD
+/Proprietes/              @TOrientationD
+/Proprietes.lean          @TOrientationD
+/Engagements.lean         @TOrientationD
+/Audit.lean               @TOrientationD
+/Rapport.lean             @TOrientationD
+/lakefile.toml            @TOrientationD
+/lean-toolchain           @TOrientationD
+/scripts/                 @TOrientationD
+/.github/                 @TOrientationD
+
+# Registre : l'ajout d'un programme passe par les mainteneurs
+/Programmes.lean          @TOrientationD
+
+# Programmes : la propriété d'un dossier Programmes/<X>/ est déclarée dans
+# Programmes/<X>/PROPRIETAIRES et imposée par la CI (accès aux programmes),
+# sans exiger que les propriétaires soient collaborateurs du dépôt.

@@ -1,0 +1,34 @@
+name: Proposer ou contester une hypothèse
+description: Nouvelle valeur sur un axe (démographie, économie, droit) ou correction d'une donnée
+labels: [hypothèse]
+body:
+  - type: dropdown
+    id: axe
+    attributes:
+      label: Axe concerné
+      options:
+        - Situation de départ
+        - Démographie
+        - Économie
+        - Cadre juridique
+        - Nouvel axe
+    validations:
+      required: true
+  - type: textarea
+    id: proposition
+    attributes:
+      label: Hypothèse proposée
+      description: Paramètres et valeurs, dans les unités du dépôt (M€, pb, pm).
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources
+      description: Documents, pages, dates. Une hypothèse sans source ne sera pas intégrée.
+    validations:
+      required: true
+  - type: textarea
+    id: justification
+    attributes:
+      label: Pourquoi cette hypothèse mérite d'être testée

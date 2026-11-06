@@ -1,0 +1,173 @@
+# Synthèse PDF des programmes : tableaux et courbes sur dix ans (PIB, déficit
+# et dette publics, chômage, actifs, emploi par secteur, impôts et taxes,
+# sensibilité au prix du pétrole et à la natalité) ; programme complet de
+# chaque programme (scripts/programme_pdf.py).
+#
+# Tourne sur main (code déjà relu), à la demande (paramètres `moteur` et
+# `programmes` pour une synthèse personnalisée) et sur les PR qui touchent
+# un moteur contribué (son auteur obtient sa synthèse en artefact). Le
+# travail de génération ne reçoit jamais de secret ni de droit d'écriture :
+# le code de la PR ne peut rien falsifier d'autre que son propre PDF.
+# Artefact « synthese ». Sur main seulement, un second travail (job
+# `publier`), qui n'exécute aucun code du dépôt, dépose la synthèse
+# générale, celle du Texte Orientation D et son livret de campagne dans le
+# dossier pdf/ de la branche `pdf` (main est protégée : tout y passe par une PR). La branche
+# n'a qu'un commit, remplacé à chaque fusion, pour ne pas alourdir le
+# dépôt ; les autres PDF restent en artefact.
+
+name: Synthèse PDF
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths: ["Moteurs/**", "Moteurs.lean"]
+  workflow_dispatch:
+    inputs:
+      moteur:
+        description: "Identifiant du moteur au centre de la synthèse (vide : moteur standard)"
+        required: false
+        default: ""
+      programmes:
+        description: "Identifiants de programmes à inclure, séparés par des virgules (vide : tous)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: synthese-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  synthese:
+    name: Générer la synthèse PDF
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ELAN_NO_OVERRIDE_NOTICE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Installer elan (gestionnaire de versions Lean)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache de la chaîne Lean
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan/toolchains
+          key: elan-${{ runner.os }}-${{ hashFiles('lean-toolchain') }}
+
+      - name: Compiler et exporter les trajectoires
+        run: |
+          mkdir -p out
+          lake build rapport
+          .lake/build/bin/rapport --json out/rapport.json --md out/rapport.md \
+            --synthese out/synthese.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Mettre en page le PDF
+        env:
+          MOTEUR: ${{ github.event.inputs.moteur }}
+          PROGRAMMES: ${{ github.event.inputs.programmes }}
+        run: |
+          python -m pip install --quiet matplotlib==3.11.2 reportlab==5.0.1
+          python scripts/synthese_pdf.py out/synthese.json out/synthese.pdf --commit "$GITHUB_SHA"
+          # Synthèse personnalisée : moteur et programmes choisis au lancement…
+          if [ -n "$MOTEUR" ] || [ -n "$PROGRAMMES" ]; then
+            python scripts/synthese_pdf.py out/synthese.json "out/synthese-personnalisee.pdf" \
+              --commit "$GITHUB_SHA" ${MOTEUR:+--moteur "$MOTEUR"} ${PROGRAMMES:+--programmes "$PROGRAMMES"}
+          fi
+          # …la synthèse du Texte Orientation D (préambule, grands principes)…
+          python scripts/synthese_pdf.py out/synthese.json out/synthese-orientation-d.pdf \
+            --commit "$GITHUB_SHA" --programmes TexteOrientationD
+          # …le livret de campagne du Texte Orientation D (préambule, mesures
+          # par thématique, rubicons / paramétrables / négociables, bilan)…
+          python scripts/livret_pdf.py out/synthese.json TexteOrientationD \
+            out/livret-orientation-d.pdf --commit "$GITHUB_SHA"
+          # …et une synthèse centrée sur chaque moteur contribué.
+          for d in Moteurs/*/; do
+            m=$(basename "$d")
+            python scripts/synthese_pdf.py out/synthese.json "out/synthese-$m.pdf" --commit "$GITHUB_SHA" --moteur "$m"
+          done
+          # Programme complet de chaque programme (mesures, sources, effets).
+          for d in Programmes/*/; do
+            p=$(basename "$d")
+            python scripts/programme_pdf.py out/synthese.json "$p" "out/programme-$p.pdf" --commit "$GITHUB_SHA"
+          done
+
+      - name: Publier la synthèse (artefact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthese
+          path: |
+            out/synthese*.pdf
+            out/programme-*.pdf
+            out/livret-*.pdf
+            out/synthese.json
+          retention-days: 90
+
+  # Dépôt des trois PDF principaux dans pdf/ sur la branche `pdf` : sur main
+  # seulement, sans exécuter de code du dépôt (artefact téléchargé, copié,
+  # commité). main est protégée (PR et vérifications obligatoires) : la
+  # branche `pdf`, hors protection, est recréée à chaque fusion avec un seul
+  # commit (poussée forcée) pour que son historique ne grossisse pas.
+  publier:
+    name: Déposer les PDF sur la branche pdf
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: synthese
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: synthese
+          path: artefact
+
+      - name: Commiter sur la branche pdf
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site/pdf
+          cp artefact/synthese.pdf site/pdf/synthese.pdf
+          cp artefact/synthese-orientation-d.pdf site/pdf/synthese-orientation-d.pdf
+          cp artefact/livret-orientation-d.pdf site/pdf/livret-orientation-d.pdf
+          cat > site/README.md <<EOF
+          # Synthèses PDF
+
+          Branche tenue à jour par l'action « Synthèse PDF »
+          (\`.github/workflows/synthese.yml\` sur \`main\`) à chaque fusion dans
+          \`main\`, pour la version ${GITHUB_SHA::7}. Elle n'a qu'un commit, remplacé
+          à chaque fois : ne pas y travailler.
+
+          * [\`pdf/synthese.pdf\`](pdf/synthese.pdf) : synthèse de tous les
+            programmes (tableaux et courbes sur dix ans, propriétés, sensibilités).
+          * [\`pdf/synthese-orientation-d.pdf\`](pdf/synthese-orientation-d.pdf) :
+            synthèse du Texte Orientation D seul, avec ses grands principes et le
+            classement de ses mesures (rubicons, paramétrables, négociables).
+          * [\`pdf/livret-orientation-d.pdf\`](pdf/livret-orientation-d.pdf) :
+            livret de campagne du Texte Orientation D (préambule, texte détaillé
+            des mesures par thématique, séparées en rubicons, paramétrables et
+            négociables, bilan chiffré).
+
+          Les autres PDF (une synthèse par moteur contribué, le programme complet
+          de chaque parti) sont dans l'artefact \`synthese\` de l'action (90 jours).
+          EOF
+          cd site
+          git init -q -b pdf
+          git config user.name TOrientationD
+          git config user.email 353462990+TOrientationD@users.noreply.github.com
+          git add README.md pdf/synthese.pdf pdf/synthese-orientation-d.pdf pdf/livret-orientation-d.pdf
+          git commit -q -m "Synthèses PDF générées par l'action pour ${GITHUB_SHA::7}"
+          git push --force -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/pdf

@@ -1,0 +1,28 @@
+name: Faire évoluer le modèle commun
+description: Nouveau levier, nouvel indicateur, changement de la projection
+labels: [modèle]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Le modèle commun s'applique à **tous** les programmes. Toute évolution
+        est discutée ici avant d'ouvrir une PR.
+  - type: textarea
+    id: besoin
+    attributes:
+      label: Besoin
+      description: Quelle mesure ou quel effet le modèle ne sait-il pas représenter aujourd'hui ?
+    validations:
+      required: true
+  - type: textarea
+    id: proposition
+    attributes:
+      label: Évolution proposée
+      description: Levier ou champ à ajouter, formule d'interprétation, paramètres d'hypothèse nécessaires.
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Références
+      description: Littérature, modèles existants, ordres de grandeur.
